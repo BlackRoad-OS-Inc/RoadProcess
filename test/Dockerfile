@@ -39,8 +39,8 @@ RUN if [ "$RUNTIME" = "bun" ]; then \
         ln -s /root/.bun/bin/bunx /usr/local/bin/bunx; \
     fi
 
-# Install mocha globally
-RUN npm install -g mocha
+# Install mocha and c8 globally
+RUN npm install -g mocha c8
 
 WORKDIR /var/pm2
 

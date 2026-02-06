@@ -23,3 +23,5 @@ e2e_time
 unit_time
 *.heapprofile
 a.out
+coverage/
+.nyc_output/

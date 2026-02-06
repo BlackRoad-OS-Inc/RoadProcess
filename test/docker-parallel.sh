@@ -8,6 +8,7 @@
 #   NODE_VERSION=18 ./test/docker-parallel.sh        # Specify Node version
 #   RUNTIME=bun ./test/docker-parallel.sh            # Test with Bun
 #   MAX_JOBS=8 ./test/docker-parallel.sh             # Override parallelism
+#   COVERAGE=true ./test/docker-parallel.sh          # Collect code coverage
 #
 
 cd "$(dirname "$0")/.."
@@ -17,6 +18,18 @@ RUNTIME=${RUNTIME:-node}
 
 # Node.js version (default: 20, ignored if RUNTIME=bun)
 NODE_VERSION=${NODE_VERSION:-20}
+
+# Coverage mode
+COVERAGE=${COVERAGE:-false}
+COVERAGE_DIR="$PWD/coverage/.nyc_output"
+
+# Test limit (for debugging - 0 means no limit)
+TEST_LIMIT=${TEST_LIMIT:-0}
+
+if [[ "$COVERAGE" == "true" ]]; then
+    rm -rf "$COVERAGE_DIR"
+    mkdir -p "$COVERAGE_DIR"
+fi
 
 # Auto-detect parallelism
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -175,6 +188,11 @@ while IFS= read -r -d '' f; do
     fi
 done < <(find test/programmatic test/interface -name "*.mocha.js" -type f -print0 2>/dev/null)
 
+# Apply test limit if set
+if [[ "$TEST_LIMIT" -gt 0 ]]; then
+    TESTS=("${TESTS[@]:0:$TEST_LIMIT}")
+fi
+
 TOTAL=${#TESTS[@]}
 GLOBAL_START=$(date +%s)
 echo "[*] Found $TOTAL tests, running with $MAX_JOBS parallel jobs"
@@ -189,19 +207,22 @@ run_test() {
     local test_name=$(basename "$test_path")
     local log_file="$RESULTS_DIR/${test_name}.log"
 
+    # Build docker run options
+    local docker_opts="--rm -i --mount type=tmpfs,destination=/root/.pm2"
+    if [[ "$COVERAGE" == "true" ]]; then
+        # Mount coverage dir and set NODE_V8_COVERAGE to capture all Node processes (including PM2 daemon)
+        docker_opts="$docker_opts -v $COVERAGE_DIR:/coverage -e NODE_V8_COVERAGE=/coverage"
+    fi
+
     if [[ "$test_type" == "e2e" ]]; then
         # E2E: extract codebase, source include.sh, then run the script
-        # Use tmpfs for ~/.pm2 to speed up PM2 file I/O
-        cat "$CODEBASE_TAR" | docker run --rm -i \
-            --mount type=tmpfs,destination=/root/.pm2 \
+        cat "$CODEBASE_TAR" | docker run $docker_opts \
             "$IMAGE_NAME" \
             bash -c "tar -xf - && source test/e2e/include.sh && bash $test_path" \
             > "$log_file" 2>&1
     else
         # Unit: extract codebase, run with mocha
-        # Use tmpfs for ~/.pm2 to speed up PM2 file I/O
-        cat "$CODEBASE_TAR" | docker run --rm -i \
-            --mount type=tmpfs,destination=/root/.pm2 \
+        cat "$CODEBASE_TAR" | docker run $docker_opts \
             "$IMAGE_NAME" \
             bash -c "tar -xf - && mocha --exit --bail $test_path" \
             > "$log_file" 2>&1
@@ -315,3 +336,27 @@ echo "============================================"
 echo "All $TOTAL tests passed in ${GLOBAL_DURATION}s"
 [[ $SKIPPED -gt 0 ]] && echo "($SKIPPED tests skipped - require host features)"
 echo "============================================"
+
+# Generate coverage report if enabled
+if [[ "$COVERAGE" == "true" ]]; then
+    echo ""
+    echo "[*] Fixing coverage paths (container -> host)..."
+    # Fix paths in coverage files: /var/pm2/ -> current directory
+    for f in "$COVERAGE_DIR"/*.json; do
+        sed -i.bak 's|file:///var/pm2/|file://'"$PWD"'/|g' "$f" 2>/dev/null || \
+        sed -i '' 's|file:///var/pm2/|file://'"$PWD"'/|g' "$f"
+    done
+    rm -f "$COVERAGE_DIR"/*.bak
+
+    echo "[*] Generating coverage report..."
+    npx c8 report --temp-directory="$COVERAGE_DIR" --reporter=html --reporter=text --reporter=lcov --report-dir=./coverage --all --src=. \
+        --include='lib/**/*.js' --include='bin/**/*.js' \
+        --exclude='test/**' --exclude='lib/templates/**' \
+        --exclude='lib/binaries/DevCLI.js' --exclude='lib/binaries/Runtime.js' --exclude='lib/binaries/Runtime4Docker.js' \
+        --exclude='lib/API/Dashboard.js' --exclude='lib/API/Monit.js' --exclude='lib/API/Serve.js' \
+        --exclude='lib/HttpInterface.js' --exclude='lib/ProcessContainerBun.js' --exclude='lib/ProcessContainerForkBun.js' \
+        --exclude='lib/tools/json5.js' --exclude='lib/tools/treeify.js' --exclude='lib/completion.js' \
+        --exclude='lib/API/pm2-plus/**'
+    echo ""
+    echo "[*] Coverage report: coverage/index.html"
+fi
