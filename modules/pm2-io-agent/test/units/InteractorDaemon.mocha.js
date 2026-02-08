@@ -483,7 +483,8 @@ describe('InteractorDaemon', () => {
         daemon.start(_ => {
           assert(_startRPCCalled === 1)
           assert(daemon.opts.ROOT_URL === cst.KEYMETRICS_ROOT_URL)
-          assert(_processSendCalled === 1)
+          // Bun: sendToParent skips process.send when IS_BUN is true
+          if (typeof Bun === 'undefined') assert(_processSendCalled === 1)
           assert(daemon.push instanceof require('../../src/push/PushInteractor.js'))
           assert(daemon.reverse instanceof require('../../src/reverse/ReverseInteractor.js'))
           clearInterval(daemon._workerEndpoint)

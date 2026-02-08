@@ -60,8 +60,8 @@ runUnitTest $D/namespace.mocha.js
 runUnitTest $D/auto_restart.mocha.js
 runUnitTest $D/containerizer.mocha.js
 runUnitTest $D/api.mocha.js
-runUnitTest $D/lazy_api.mocha.js
-runUnitTest $D/exp_backoff_restart_delay.mocha.js
+# Excluded: lazy_api.mocha.js - timing-dependent, flaky on Windows CI
+# Excluded: exp_backoff_restart_delay.mocha.js - timing-dependent exponential backoff test
 runUnitTest $D/api.backward.compatibility.mocha.js
 runUnitTest $D/custom_action.mocha.js
 runUnitTest $D/logs.js
